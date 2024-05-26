@@ -17,14 +17,14 @@
     </div>
     <br>
     <div align="center">
-        <img src="https://github.com/Djdefrag/QualityScaler/assets/32263112/9aa539e6-9584-46c2-9af5-6b031bcb6823">
+        <img src="https://github.com/Djdefrag/QualityScaler/assets/32263112/f02352ad-1549-4fdc-80be-299a68c6f084">
     </div>
 </body>
 </html>
 
 
 ## What is QualityScaler?
-Qualityscaler is a Windows app powered by AI to enhance, enlarge and reduce noise in photographs and videos.
+Qualityscaler is a Windows app powered by AI to enhance, upscale and de-noise photographs and videos.
 
 ## Installation
 1. Download the [latest release](../../releases/latest) or clone the repository
@@ -42,8 +42,8 @@ Qualityscaler is a Windows app powered by AI to enhance, enlarge and reduce nois
    ```
 
 ## Other AI projects.🤓
-- https://github.com/Djdefrag/RealESRScaler / RealScaler - image/video AI upscaler app (Real-ESRGAN)
-- https://github.com/Djdefrag/FluidFrames.RIFE / FluidFrames.RIFE - video AI frame generation app (RIFE-HDv3)
+- https://github.com/Djdefrag/RealScaler / RealScaler - image/video AI upscaler (Real-ESRGAN)
+- https://github.com/Djdefrag/FluidFrames.RIFE / FluidFrames.RIFE - video AI frame generation
 
 ## Credits.
 - BSRGAN - https://github.com/cszn/BSRGAN
@@ -57,7 +57,7 @@ Qualityscaler is a Windows app powered by AI to enhance, enlarge and reduce nois
 ## How is made. 🛠
 QualityScaler is completely written in Python, from backend to frontend. 
 External packages are:
-- AI  -> torch / torch-directml
+- AI  -> torch / onnxruntime-directml
 - GUI -> customtkinter
 - Image/video -> OpenCV / moviepy
 - Packaging   -> nuitka
@@ -74,7 +74,6 @@ External packages are:
 - [x] Automatic image tiling and merging to avoid gpu VRAM limitation
 - [x] Resize image/video before AI upscaling
 - [x] Interpolation between the original and upscaled image/video
-- [x] Multiple Gpu support
 - [x] Compatible images - png, jpeg, bmp, webp, tif  
 - [x] Compatible video  - mp4, wemb, gif, mkv, flv, avi, mov, qt 
 
@@ -86,7 +85,7 @@ External packages are:
     - [x] Optimizing video frame resize and extraction speed
     - [x] Multi GPU support (for pc with double GPU, integrated + dedicated)
     - [x] Python 3.10 (expecting ~10% more performance)
-- [ ] 2.X versions
+- [x] 2.X versions
     - [x] New, completely redesigned graphical interface based on @customtkinter
     - [x] Upscaling images and videos at once (currently it is possible to upscale images or single video)
     - [x] Upscale multiple videos at once
@@ -97,11 +96,14 @@ External packages are:
     - [x] Support for SRVGGNetCompact AI architecture
     - [x] Metadata extraction and application from original file to upscaled file (via exiftool)
     - [x] Support for SAFMN AI architecture
-    - [ ] Python 3.11 (expecting ~30% better performance)
-    - [ ] torch/torch-directml 2.0 (expecting ~20% better performance)
 - [ ] 3.X versions
+    - [x] New AI engine powered by onnxruntime-directml (https://pypi.org/project/onnxruntime-directml/)
+    - [x] Python 3.11 (~10% performance improvements)
+    - [x] Display images/videos upscaled resolution in the GUI
+    - [x] FFMPEG 7 (latest release)
+    - [x] Video multi-threading AI upscale 
     - [ ] Python 3.12
-    - [ ] torch/torch-directml 2.1 
+    - [ ] Video upscaling pause and restart
 
 ## Some Example.
 
