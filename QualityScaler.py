@@ -1,6 +1,7 @@
 
 # Standard library imports
 import sys
+from shlex      import split as shlex_split
 from functools  import cache
 from time       import sleep
 from webbrowser import open as open_browser
@@ -175,12 +176,15 @@ gpus_list              = [ "Auto", "GPU 1", "GPU 2", "GPU 3", "GPU 4" ]
 keep_frames_list       = [ "OFF", "ON" ]
 image_extension_list   = [ ".png", ".jpg", ".bmp", ".tiff" ]
 video_extension_list   = [ ".mp4", ".mkv", ".avi", ".mov" ]
-video_codec_list = [ 
-    "x264",       "x265",       MENU_LIST_SEPARATOR[0],
-    "h264_nvenc", "hevc_nvenc", MENU_LIST_SEPARATOR[0],
-    "h264_amf",   "hevc_amf",   MENU_LIST_SEPARATOR[0],
-    "h264_qsv",   "hevc_qsv",
+video_codec_list = [
+    "x264",        "x265",        MENU_LIST_SEPARATOR[0],
+    "h264_nvenc",  "hevc_nvenc",  "av1_nvenc",  MENU_LIST_SEPARATOR[0],
+    "h264_amf",    "hevc_amf",    "av1_amf",    MENU_LIST_SEPARATOR[0],
+    "h264_qsv",    "hevc_qsv",    MENU_LIST_SEPARATOR[0],
+    "libsvtav1",   "libaom-av1",  "libvpx-vp9",
     ]
+
+pix_fmt_list = ["yuv420p", "yuv420p10le", "yuv444p10le"]
 
 OUTPUT_PATH_CODED    = "Same path as input files"
 DOCUMENT_PATH        = os_path_join(os_path_expanduser('~'), 'Documents')
@@ -191,6 +195,9 @@ EXIFTOOL_EXE_PATH    = find_by_relative_path(f"Assets{os_separator}exiftool.exe"
 COMPLETED_STATUS = "Completed"
 ERROR_STATUS     = "Error"
 STOP_STATUS      = "Stop"
+
+selected_video_codec_var = None
+selected_pix_fmt_var   = None
 
 
 offset_y_options = 0.0825
@@ -1007,13 +1014,14 @@ def create_info_button(
     return frame
 
 def create_option_menu(
-        command:       Callable, 
+        command:       Callable,
         values:        list,
         default_value: str,
-        border_color:  str = "#404040", 
+        border_color:  str = "#404040",
         border_width:  int = 1,
         width:         int = 159,
-        height:        int = 26
+        height:        int = 26,
+        variable:      StringVar | None = None,
     ) -> CTkFrame:
 
     total_width  = (width + 2 * border_width)
@@ -1029,11 +1037,12 @@ def create_option_menu(
     )
     
     option_menu = CTkOptionMenu(
-        master             = frame, 
+        master             = frame,
         command            = command,
         values             = values,
         width              = width,
         height             = height,
+        variable           = variable,
         corner_radius      = 0,
         dropdown_font      = bold12,
         font               = bold11,
@@ -1046,6 +1055,8 @@ def create_option_menu(
     )
     
     option_menu.place(x = (total_width - width) / 2, y = (total_height - height) / 2)
+    if variable is not None:
+        variable.set(default_value)
     option_menu.set(default_value)
     return frame
 
@@ -1342,14 +1353,18 @@ def video_encoding(
         process_status_q: multiprocessing_Queue,
         video_path: str,
         video_output_path: str,
-        upscaled_frame_paths: list[str], 
-        selected_video_codec: str, 
+        upscaled_frame_paths: list[str],
+        selected_video_codec: str,
+        selected_pix_fmt: str,
+        advanced_ffmpeg_args: str,
         ) -> None:
 
-    if   "x264" in selected_video_codec: codec = "libx264"
-    elif "x265" in selected_video_codec: codec = "libx265"
-    else: codec = selected_video_codec
-    
+    codec   = selected_video_codec
+    if codec in ("x264", "x265"):
+        codec = f"lib{codec}"
+    pix_fmt = selected_pix_fmt
+    is_10bit_pix_fmt = "10" in pix_fmt
+
     txt_path      = f"{os_path_splitext(video_output_path)[0]}.txt"
     no_audio_path = f"{os_path_splitext(video_output_path)[0]}_no_audio{os_path_splitext(video_output_path)[1]}"
     video_fps     = str(get_video_fps(video_path))
@@ -1376,11 +1391,23 @@ def video_encoding(
             "-r",           video_fps,
             "-i",           txt_path,
             "-c:v",         codec,
-            "-vf",          "scale=in_range=full:out_range=limited,format=yuv420p",
+            "-vf",          f"scale=in_range=full:out_range=limited,format={pix_fmt}",
             "-color_range", "tv",
             "-b:v",         "12000k",
-            no_audio_path
         ]
+
+        if codec == "hevc_amf":
+            encoding_command.extend(["-quality", "quality", "-usage", "transcoding"])
+            if is_10bit_pix_fmt:
+                encoding_command.extend(["-profile:v", "main10"])
+
+        if codec == "av1_amf":
+            encoding_command.extend(["-usage", "transcoding"])
+
+        if advanced_ffmpeg_args:
+            encoding_command.extend(shlex_split(advanced_ffmpeg_args))
+
+        encoding_command.append(no_audio_path)
         subprocess_run(encoding_command, check = True, shell = "False")
         if os_path_exists(txt_path): os_remove(txt_path)
     except:
@@ -1588,6 +1615,8 @@ def upscale_button_command() -> None:
     global selected_image_extension
     global selected_video_extension
     global selected_video_codec
+    global selected_pix_fmt
+    global selected_advanced_ffmpeg_args
     global tiles_resolution
     global input_resize_factor
     global output_resize_factor
@@ -1596,6 +1625,8 @@ def upscale_button_command() -> None:
     
     if user_input_checks():
         info_message.set("Loading")
+
+        advanced_ffmpeg_args_value = selected_advanced_ffmpeg_args.get()
 
         print("=" * 50)
         print("> Starting upscale:")
@@ -1609,6 +1640,8 @@ def upscale_button_command() -> None:
         print(f"    Selected image output extension: {selected_image_extension}")
         print(f"    Selected video output extension: {selected_video_extension}")
         print(f"    Selected video output codec: {selected_video_codec}")
+        print(f"    Selected pixel format: {selected_pix_fmt}")
+        print(f"    Advanced ffmpeg args: {advanced_ffmpeg_args_value}")
         print(f"    Input resize factor: {int(input_resize_factor * 100)}%")
         print(f"    Output resize factor: {int(output_resize_factor * 100)}%")
         print(f"    Save frames: {selected_keep_frames}")
@@ -1639,6 +1672,8 @@ def upscale_button_command() -> None:
                 selected_image_extension,
                 selected_video_extension,
                 selected_video_codec,
+                selected_pix_fmt,
+                advanced_ffmpeg_args_value,
             )
         )
         process_upscale_orchestrator.start()
@@ -1663,6 +1698,8 @@ def upscale_orchestrator(
         selected_image_extension:   str,
         selected_video_extension:   str,
         selected_video_codec:       str,
+        selected_pix_fmt:           str,
+        advanced_ffmpeg_args:       str,
         ) -> None:
 
     try:
@@ -1688,6 +1725,8 @@ def upscale_orchestrator(
                     tiles_resolution            = tiles_resolution,
                     selected_video_extension    = selected_video_extension,
                     selected_video_codec        = selected_video_codec,
+                    selected_pix_fmt            = selected_pix_fmt,
+                    advanced_ffmpeg_args        = advanced_ffmpeg_args,
                     selected_keep_frames        = selected_keep_frames,
                 )
             else:
@@ -1806,7 +1845,7 @@ def upscale_video(
         process_status_q:           multiprocessing_Queue,
         video_frames_and_info_q:    multiprocessing_Queue,
         event_stop_upscale_process: multiprocessing_Event,
-        video_path:                 str, 
+        video_path:                 str,
         file_number:                int,
         selected_output_path:       str,
         selected_AI_model:          str,
@@ -1815,10 +1854,12 @@ def upscale_video(
         selected_gpu:               str,
         input_resize_factor:        int,
         output_resize_factor:       int,
-        tiles_resolution:           int, 
+        tiles_resolution:           int,
         selected_video_extension:   str,
         selected_video_codec:       str,
         selected_keep_frames:       bool,
+        selected_pix_fmt:           str,
+        advanced_ffmpeg_args:       str,
         ) -> None:
     
 
@@ -2159,7 +2200,15 @@ def upscale_video(
 
     # 6. Video encoding
     write_process_status(process_status_q, f"{file_number}. Encoding upscaled video")
-    video_encoding(process_status_q, video_path, video_output_path, upscaled_frame_paths, selected_video_codec)
+    video_encoding(
+        process_status_q,
+        video_path,
+        video_output_path,
+        upscaled_frame_paths,
+        selected_video_codec,
+        selected_pix_fmt,
+        advanced_ffmpeg_args
+    )
     copy_file_metadata(video_path, video_output_path)
 
 
@@ -2344,12 +2393,26 @@ def select_image_extension_from_menu(selected_option: str) -> None:
     selected_image_extension = selected_option
 
 def select_video_extension_from_menu(selected_option: str) -> None:
-    global selected_video_extension   
+    global selected_video_extension
     selected_video_extension = selected_option
 
 def select_video_codec_from_menu(selected_option: str) -> None:
+    global selected_video_codec_var
     global selected_video_codec
+    if selected_option == MENU_LIST_SEPARATOR[0]:
+        if selected_video_codec_var is not None:
+            selected_video_codec_var.set(selected_video_codec)
+        info_message.set("Please pick a codec, not a separator")
+        return
+
     selected_video_codec = selected_option
+
+def select_pix_fmt_from_menu(selected_option: str) -> None:
+    global selected_pix_fmt_var
+    global selected_pix_fmt
+    selected_pix_fmt = selected_option
+    if selected_pix_fmt_var is not None:
+        selected_pix_fmt_var.set(selected_option)
 
 
 
@@ -2784,15 +2847,18 @@ def place_video_codec_keep_frames_menus():
         option_list = [
             " \n SOFTWARE ENCODING (CPU)\n"
             " • x264 | H.264 software encoding\n"
-            " • x265 | HEVC (H.265) software encoding\n",
+            " • x265 | HEVC (H.265) software encoding\n"
+            " • libsvtav1 / libaom-av1 | AV1 software encoding (8/10-bit)\n",
 
             " \n NVIDIA GPU ENCODING (NVENC - Optimized for NVIDIA GPU)\n"
             " • h264_nvenc | H.264 hardware encoding\n"
-            " • hevc_nvenc | HEVC (H.265) hardware encoding\n",
+            " • hevc_nvenc | HEVC (H.265) hardware encoding\n"
+            " • av1_nvenc | AV1 hardware encoding (Ada/Lovelace+)\n",
 
             " \n AMD GPU ENCODING (AMF - Optimized for AMD GPU)\n"
             " • h264_amf | H.264 hardware encoding\n"
-            " • hevc_amf | HEVC (H.265) hardware encoding\n",
+            " • hevc_amf | HEVC (H.265) hardware encoding | main10 supported\n"
+            " • av1_amf | AV1 hardware encoding (RDNA3+) | 8/10-bit\n",
 
             " \n INTEL GPU ENCODING (QSV - Optimized for Intel GPU)\n"
             " • h264_qsv | H.264 hardware encoding\n"
@@ -2833,7 +2899,13 @@ def place_video_codec_keep_frames_menus():
 
     # Video codec
     info_button = create_info_button(open_info_video_codec, "Video codec")
-    option_menu = create_option_menu(select_video_codec_from_menu, video_codec_list, default_video_codec, width = little_menu_width)
+    option_menu = create_option_menu(
+        select_video_codec_from_menu,
+        video_codec_list,
+        default_video_codec,
+        width     = little_menu_width,
+        variable  = selected_video_codec_var,
+    )
     info_button.place(relx = column_info1,        rely = widget_row, anchor = "center")
     option_menu.place(relx = column_1_4, rely = widget_row, anchor = "center")
 
@@ -2842,6 +2914,62 @@ def place_video_codec_keep_frames_menus():
     option_menu = create_option_menu(select_save_frame_from_menu, keep_frames_list, default_keep_frames, width = little_menu_width)
     info_button.place(relx = column_info2,      rely = widget_row, anchor = "center")
     option_menu.place(relx = column_2_9, rely = widget_row, anchor = "center")
+
+def place_advanced_video_options():
+
+    def open_info_pix_fmt():
+        option_list = [
+            " \n PIXEL FORMAT\n",
+            " • yuv420p | 8-bit 4:2:0 (default)\n",
+            " • yuv420p10le | 10-bit 4:2:0 for HDR-friendly encodes\n",
+            " • yuv444p10le | 10-bit 4:4:4 for lossless pipelines\n",
+        ]
+
+        MessageBox(
+            messageType   = "info",
+            title         = "Pixel format",
+            subtitle      = "Choose the pixel format used during video encoding",
+            default_value = None,
+            option_list   = option_list
+        )
+
+    def open_info_custom_ffmpeg():
+        option_list = [
+            "Add extra ffmpeg parameters that will be appended before the output file.\n",
+            "Useful for:",
+            " • Bitrate or CRF tuning (e.g. -crf 18 -preset slow)",
+            " • Threading or filters",
+            " • Overriding defaults such as -c:v or -pix_fmt",
+        ]
+
+        MessageBox(
+            messageType   = "info",
+            title         = "Advanced ffmpeg arguments",
+            subtitle      = "Custom flags appended to the encoding command",
+            default_value = None,
+            option_list   = option_list
+        )
+
+    widget_row = row8
+
+    background = create_option_background()
+    background.place(relx = 0.75, rely = widget_row, relwidth = 0.48, anchor = "center")
+
+    info_button = create_info_button(open_info_pix_fmt, "Pixel format")
+    option_menu = create_option_menu(
+        select_pix_fmt_from_menu,
+        pix_fmt_list,
+        default_pix_fmt,
+        width    = little_menu_width,
+        variable = selected_pix_fmt_var,
+    )
+    info_button.place(relx = column_info1, rely = widget_row, anchor = "center")
+    option_menu.place(relx = column_1_4, rely = widget_row, anchor = "center")
+
+    info_button = create_info_button(open_info_custom_ffmpeg, "Advanced ffmpeg args")
+    text_box    = create_text_box(selected_advanced_ffmpeg_args, width = 235)
+    info_button.place(relx = column_info2, rely = widget_row, anchor = "center")
+    text_box.place(relx = column_3, rely = widget_row, anchor = "center")
 
 def place_output_path_textbox():
 
@@ -2927,6 +3055,8 @@ def on_app_close() -> None:
     global selected_image_extension
     global selected_video_extension
     global selected_video_codec
+    global selected_pix_fmt
+    global selected_advanced_ffmpeg_args
     global tiles_resolution
     global input_resize_factor
 
@@ -2935,6 +3065,8 @@ def on_app_close() -> None:
     image_extension_to_save = selected_image_extension
     video_extension_to_save = selected_video_extension
     video_codec_to_save     = selected_video_codec
+    pix_fmt_to_save         = selected_pix_fmt
+    advanced_args_to_save   = selected_advanced_ffmpeg_args.get()
     blending_to_save        = {0: "OFF", 0.3: "Low", 0.5: "Medium", 0.7: "High"}.get(selected_blending_factor)
 
     if selected_keep_frames == True:
@@ -2955,6 +3087,8 @@ def on_app_close() -> None:
         "default_image_extension":      image_extension_to_save,
         "default_video_extension":      video_extension_to_save,
         "default_video_codec":          video_codec_to_save,
+        "default_pix_fmt":              pix_fmt_to_save,
+        "default_advanced_ffmpeg_args": advanced_args_to_save,
         "default_blending":             blending_to_save,
         "default_output_path":          selected_output_path.get(),
         "default_input_resize_factor":  str(selected_input_resize_factor.get()),
@@ -2991,16 +3125,21 @@ class App():
         place_gpu_gpuVRAM_menus()
         place_image_video_output_menus()
         place_video_codec_keep_frames_menus()
+        place_advanced_video_options()
 
         place_message_label()
         place_upscale_button()
 
 if __name__ == "__main__":
-    
-    if os_path_exists(FFMPEG_EXE_PATH): 
+
+    if os_path_exists(FFMPEG_EXE_PATH):
         print(f"[{app_name}] ffmpeg.exe found")
     else:
         print(f"[{app_name}] ffmpeg.exe not found, please install ffmpeg.exe following the guide")
+
+    amd_gpu_hint = check_directml_support()
+    if amd_gpu_hint:
+        print(f"[{app_name}] DirectML/AMD GPU detected: preferring AMF codecs and 10-bit defaults")
 
     if os_path_exists(USER_PREFERENCE_PATH):
         print(f"[{app_name}] Preference file exist")
@@ -3012,7 +3151,15 @@ if __name__ == "__main__":
             default_keep_frames          = json_data.get("default_keep_frames",          keep_frames_list[1])
             default_image_extension      = json_data.get("default_image_extension",      image_extension_list[0])
             default_video_extension      = json_data.get("default_video_extension",      video_extension_list[0])
-            default_video_codec          = json_data.get("default_video_codec",          video_codec_list[0])
+            default_video_codec          = json_data.get(
+                "default_video_codec",
+                "hevc_amf" if amd_gpu_hint and "hevc_amf" in video_codec_list else video_codec_list[0]
+            )
+            default_pix_fmt              = json_data.get(
+                "default_pix_fmt",
+                "yuv420p10le" if amd_gpu_hint else pix_fmt_list[0]
+            )
+            default_advanced_ffmpeg_args = json_data.get("default_advanced_ffmpeg_args", "")
             default_blending             = json_data.get("default_blending",             blending_list[1])
             default_output_path          = json_data.get("default_output_path",          OUTPUT_PATH_CODED)
             default_input_resize_factor  = json_data.get("default_input_resize_factor",  str(50))
@@ -3026,7 +3173,9 @@ if __name__ == "__main__":
         default_keep_frames          = keep_frames_list[1]
         default_image_extension      = image_extension_list[0]
         default_video_extension      = video_extension_list[0]
-        default_video_codec          = video_codec_list[0]
+        default_video_codec          = "hevc_amf" if amd_gpu_hint and "hevc_amf" in video_codec_list else video_codec_list[0]
+        default_pix_fmt              = "yuv420p10le" if amd_gpu_hint else pix_fmt_list[0]
+        default_advanced_ffmpeg_args = ""
         default_blending             = blending_list[1]
         default_output_path          = OUTPUT_PATH_CODED
         default_input_resize_factor  = str(50)
@@ -3048,13 +3197,6 @@ if __name__ == "__main__":
     video_frames_and_info_q    = multiprocessing_manager.Queue(maxsize=queue_maxsize)
     event_stop_upscale_process = multiprocessing_manager.Event()
 
-    window = CTk() 
-    info_message                  = StringVar()
-    selected_output_path          = StringVar()
-    selected_input_resize_factor  = StringVar()
-    selected_output_resize_factor = StringVar()
-    selected_VRAM_limiter         = StringVar()
-
     global selected_file_list
     global selected_AI_model
     global selected_blending_factor
@@ -3064,8 +3206,20 @@ if __name__ == "__main__":
     global selected_image_extension
     global selected_video_extension
     global selected_video_codec
+    global selected_pix_fmt
+    global selected_advanced_ffmpeg_args
     global tiles_resolution
     global input_resize_factor
+    
+    window = CTk()
+    info_message                  = StringVar()
+    selected_output_path          = StringVar()
+    selected_input_resize_factor  = StringVar()
+    selected_output_resize_factor = StringVar()
+    selected_VRAM_limiter         = StringVar()
+    selected_video_codec_var      = StringVar()
+    selected_pix_fmt_var          = StringVar()
+    selected_advanced_ffmpeg_args = StringVar()
 
     selected_file_list = []
 
@@ -3074,10 +3228,13 @@ if __name__ == "__main__":
     selected_image_extension = default_image_extension
     selected_video_extension = default_video_extension
     selected_video_codec     = default_video_codec
-    
-    if default_AI_multithreading == "OFF": 
+    selected_pix_fmt         = default_pix_fmt
+    selected_video_codec_var.set(default_video_codec)
+    selected_pix_fmt_var.set(default_pix_fmt)
+
+    if default_AI_multithreading == "OFF":
         selected_AI_multithreading = 1
-    else: 
+    else:
         selected_AI_multithreading = int(default_AI_multithreading.split()[0])
     
     if default_keep_frames == "ON": 
@@ -3091,6 +3248,7 @@ if __name__ == "__main__":
     selected_output_resize_factor.set(default_output_resize_factor)
     selected_VRAM_limiter.set(default_VRAM_limiter)
     selected_output_path.set(default_output_path)
+    selected_advanced_ffmpeg_args.set(default_advanced_ffmpeg_args)
 
     info_message.set("Hi :)")
     selected_input_resize_factor.trace_add('write', update_file_widget)
