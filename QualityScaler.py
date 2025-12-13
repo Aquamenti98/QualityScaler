@@ -175,6 +175,7 @@ blending_list          = [ "OFF", "Low", "Medium", "High" ]
 gpus_list              = [ "Auto", "GPU 1", "GPU 2", "GPU 3", "GPU 4" ]
 keep_frames_list       = [ "OFF", "ON" ]
 image_extension_list   = [ ".png", ".jpg", ".bmp", ".tiff" ]
+frame_extension_list   = [ ".png", ".jpg" ]
 video_extension_list   = [ ".mp4", ".mkv", ".avi", ".mov" ]
 video_codec_list = [
     "x264",        "x265",        MENU_LIST_SEPARATOR[0],
@@ -1215,11 +1216,12 @@ def prepare_output_image_filename(
     return output_path
 
 def prepare_output_video_frame_filename(
-        frame_path: str, 
-        selected_AI_model: str, 
-        input_resize_factor: int, 
+        frame_path: str,
+        selected_AI_model: str,
+        input_resize_factor: int,
         output_resize_factor: int,
-        selected_blending_factor: float
+        selected_blending_factor: float,
+        selected_frame_extension: str,
         ) -> str:
             
     file_path_no_extension, _ = os_path_splitext(frame_path)
@@ -1244,7 +1246,7 @@ def prepare_output_video_frame_filename(
             to_append += "_Blending-High"
 
     # Selected image extension
-    to_append += f".jpg"
+    to_append += f"{selected_frame_extension}"
         
     output_path += to_append
 
@@ -1455,11 +1457,12 @@ def check_video_upscaling_resume(
 def get_video_frames_for_upscaling_resume(
         target_directory: str,
         selected_AI_model: str,
+        selected_frame_extension: str,
         ) -> list[str]:
     
     # Only file names
     directory_files      = os_listdir(target_directory)
-    original_frames_path = [file for file in directory_files if file.endswith('.jpg')]
+    original_frames_path = [file for file in directory_files if file.endswith(selected_frame_extension)]
     original_frames_path = [file for file in original_frames_path if selected_AI_model not in file]
 
     # Adding the complete path to file
@@ -1613,6 +1616,7 @@ def upscale_button_command() -> None:
     global selected_AI_multithreading
     global selected_blending_factor
     global selected_image_extension
+    global selected_frame_extension
     global selected_video_extension
     global selected_video_codec
     global selected_pix_fmt
@@ -1638,6 +1642,7 @@ def upscale_button_command() -> None:
         print(f"    Selected GPU: {selected_gpu}")
         print(f"    Tiles resolution for selected GPU VRAM: {tiles_resolution}x{tiles_resolution}px")
         print(f"    Selected image output extension: {selected_image_extension}")
+        print(f"    Selected frame extraction extension: {selected_frame_extension}")
         print(f"    Selected video output extension: {selected_video_extension}")
         print(f"    Selected video output codec: {selected_video_codec}")
         print(f"    Selected pixel format: {selected_pix_fmt}")
@@ -1670,6 +1675,7 @@ def upscale_button_command() -> None:
                 selected_blending_factor,
                 selected_keep_frames,
                 selected_image_extension,
+                selected_frame_extension,
                 selected_video_extension,
                 selected_video_codec,
                 selected_pix_fmt,
@@ -1696,6 +1702,7 @@ def upscale_orchestrator(
         selected_blending_factor:   float,
         selected_keep_frames:       bool,
         selected_image_extension:   str,
+        selected_frame_extension:   str,
         selected_video_extension:   str,
         selected_video_codec:       str,
         selected_pix_fmt:           str,
@@ -1726,6 +1733,7 @@ def upscale_orchestrator(
                     selected_video_extension    = selected_video_extension,
                     selected_video_codec        = selected_video_codec,
                     selected_pix_fmt            = selected_pix_fmt,
+                    selected_frame_extension    = selected_frame_extension,
                     advanced_ffmpeg_args        = advanced_ffmpeg_args,
                     selected_keep_frames        = selected_keep_frames,
                 )
@@ -1859,6 +1867,7 @@ def upscale_video(
         selected_video_codec:       str,
         selected_keep_frames:       bool,
         selected_pix_fmt:           str,
+        selected_frame_extension:   str,
         advanced_ffmpeg_args:       str,
         ) -> None:
     
@@ -1891,13 +1900,14 @@ def upscale_video(
             file_number:                     int,
             upscaled_frame_paths:            list[str],
             selected_blending_factor:        float,
+            selected_frame_extension:        str,
         ) -> None:
 
         def _internal_save_frame(starting_frame, upscaled_frame, upscaled_frame_path, selected_blending_factor):
             if selected_blending_factor > 0:
-                blend_images_and_save(upscaled_frame_path, starting_frame, upscaled_frame, selected_blending_factor)
+                blend_images_and_save(upscaled_frame_path, starting_frame, upscaled_frame, selected_blending_factor, selected_frame_extension)
             else:
-                image_write(upscaled_frame_path, upscaled_frame)
+                image_write(upscaled_frame_path, upscaled_frame, selected_frame_extension)
 
         saved_frames_count      = 0
         processing_times_list   = []
@@ -2004,6 +2014,7 @@ def upscale_video(
             file_number:                int,
             target_directory:           str,
             video_path:                 str,
+            selected_frame_extension:   str,
         ) -> list[str]:
 
         # 1. Get total number of frames
@@ -2031,7 +2042,7 @@ def upscale_video(
         monitor_thread.start()
 
         # 4. Create FFMPEG command to extract video frames
-        output_pattern = os_path_join(target_directory, "frame_%03d.jpg")
+        output_pattern = os_path_join(target_directory, f"frame_%03d{selected_frame_extension}")
         extraction_command = [
             FFMPEG_EXE_PATH,
             "-y",
@@ -2039,9 +2050,12 @@ def upscale_video(
             "-err_detect", "ignore_err",
             "-i",          video_path,
             "-r",          str(frame_rate),
-            "-qscale:v",   "3",
-            output_pattern
         ]
+
+        if selected_frame_extension.lower() in (".jpg", ".jpeg"):
+            extraction_command.extend(["-qscale:v", "1"])
+
+        extraction_command.append(output_pattern)
         
         # 5. Execute FFMPEG command
         startupinfo = None
@@ -2077,7 +2091,7 @@ def upscale_video(
         extracted_files = [
             os_path_join(target_directory, f)
             for f in natsorted(os_listdir(target_directory))
-            if f.endswith(".jpg") and f.startswith("frame_")
+            if f.endswith(selected_frame_extension) and f.startswith("frame_")
         ]
 
         return extracted_files
@@ -2087,7 +2101,7 @@ def upscale_video(
             video_frames_and_info_q:    multiprocessing_Queue,
             event_stop_upscale_process: multiprocessing_Event,
 
-            file_number:              int, 
+            file_number:              int,
             selected_AI_model:        str,
             selected_gpu:             str,
             input_resize_factor:      int,
@@ -2097,19 +2111,21 @@ def upscale_video(
             upscaled_frame_paths:     list[str],
             threads_number:           int,
             selected_blending_factor: float,
+            selected_frame_extension: str,
         ) -> None:
 
         event_stop_upscaled_save_thread = multiprocessing_Event()
         Thread(
             target = manage_upscaled_frames_save_on_disk,
             args = (
-                process_status_q, 
-                video_frames_and_info_q, 
+                process_status_q,
+                video_frames_and_info_q,
                 event_stop_upscale_process,
                 event_stop_upscaled_save_thread,
-                file_number, 
-                upscaled_frame_paths, 
-                selected_blending_factor, 
+                file_number,
+                upscaled_frame_paths,
+                selected_blending_factor,
+                selected_frame_extension,
             )
         ).start()
 
@@ -2159,42 +2175,54 @@ def upscale_video(
     video_upscale_continue = check_video_upscaling_resume(target_directory, selected_AI_model)
     if video_upscale_continue:
         write_process_status(process_status_q, f"{file_number}. Resume video upscaling")
-        extracted_frames_paths = get_video_frames_for_upscaling_resume(target_directory, selected_AI_model)
+        extracted_frames_paths = get_video_frames_for_upscaling_resume(target_directory, selected_AI_model, selected_frame_extension)
     else:
         write_process_status(process_status_q, f"{file_number}. Extracting video frames")
         extracted_frames_paths = extract_video_frames(
             process_status_q           = process_status_q,
             event_stop_upscale_process = event_stop_upscale_process,
-            file_number                = file_number, 
-            target_directory           = target_directory, 
-            video_path                 = video_path
+            file_number                = file_number,
+            target_directory           = target_directory,
+            video_path                 = video_path,
+            selected_frame_extension   = selected_frame_extension,
         )
 
-    upscaled_frame_paths = [prepare_output_video_frame_filename(frame_path, selected_AI_model, input_resize_factor, output_resize_factor, selected_blending_factor) for frame_path in extracted_frames_paths]
+    upscaled_frame_paths = [
+        prepare_output_video_frame_filename(
+            frame_path,
+            selected_AI_model,
+            input_resize_factor,
+            output_resize_factor,
+            selected_blending_factor,
+            selected_frame_extension,
+        )
+        for frame_path in extracted_frames_paths
+    ]
 
 
     # 3. Check if video need tiles OR video multithreading upscale
-    AI_instance    = AI_upscale(selected_AI_model, selected_gpu, input_resize_factor, output_resize_factor, tiles_resolution) 
+    AI_instance    = AI_upscale(selected_AI_model, selected_gpu, input_resize_factor, output_resize_factor, tiles_resolution)
     threads_number = AI_instance.calculate_optimal_multithreads_number(extracted_frames_paths[0], selected_AI_multithreading)
     AI_instance    = None
 
 
     # 4. Upscaling video frames
-    write_process_status(process_status_q, f"{file_number}. Upscaling video") 
+    write_process_status(process_status_q, f"{file_number}. Upscaling video")
     upscale_video_frames(
-        process_status_q           = process_status_q, 
+        process_status_q           = process_status_q,
         video_frames_and_info_q    = video_frames_and_info_q,
         event_stop_upscale_process = event_stop_upscale_process,
-        file_number                = file_number, 
-        selected_AI_model          = selected_AI_model, 
-        selected_gpu               = selected_gpu, 
-        input_resize_factor        = input_resize_factor, 
-        output_resize_factor       = output_resize_factor, 
-        tiles_resolution           = tiles_resolution, 
-        extracted_frames_paths     = extracted_frames_paths, 
-        upscaled_frame_paths       = upscaled_frame_paths, 
-        threads_number             = threads_number, 
+        file_number                = file_number,
+        selected_AI_model          = selected_AI_model,
+        selected_gpu               = selected_gpu,
+        input_resize_factor        = input_resize_factor,
+        output_resize_factor       = output_resize_factor,
+        tiles_resolution           = tiles_resolution,
+        extracted_frames_paths     = extracted_frames_paths,
+        upscaled_frame_paths       = upscaled_frame_paths,
+        threads_number             = threads_number,
         selected_blending_factor   = selected_blending_factor,
+        selected_frame_extension   = selected_frame_extension,
         )
 
 
@@ -2389,8 +2417,12 @@ def select_save_frame_from_menu(selected_option: str):
     elif selected_option == "OFF": selected_keep_frames = False
 
 def select_image_extension_from_menu(selected_option: str) -> None:
-    global selected_image_extension   
+    global selected_image_extension
     selected_image_extension = selected_option
+
+def select_frame_extension_from_menu(selected_option: str) -> None:
+    global selected_frame_extension
+    selected_frame_extension = selected_option
 
 def select_video_extension_from_menu(selected_option: str) -> None:
     global selected_video_extension
@@ -2876,10 +2908,10 @@ def place_video_codec_keep_frames_menus():
 
     def open_info_keep_frames():
         option_list = [
-            "\n ON \n" + 
+            "\n ON \n" +
             " The app does NOT delete the video frames after creating the upscaled video \n",
 
-            "\n OFF \n" + 
+            "\n OFF \n" +
             " The app deletes the video frames after creating the upscaled video \n"
         ]
 
@@ -2887,6 +2919,21 @@ def place_video_codec_keep_frames_menus():
             messageType   = "info",
             title         = "Keep video frames",
             subtitle      = "This widget allows to choose to keep video frames",
+            default_value = None,
+            option_list   = option_list
+        )
+
+    def open_info_frame_extension():
+        option_list = [
+            "\n FRAME FORMAT \n",
+            " • .png | Lossless extraction (largest size, best quality)\n",
+            " • .jpg | High-quality JPEG with minimal compression\n",
+        ]
+
+        MessageBox(
+            messageType   = "info",
+            title         = "Frame format",
+            subtitle      = "Choose how extracted video frames are saved",
             default_value = None,
             option_list   = option_list
         )
@@ -2914,6 +2961,12 @@ def place_video_codec_keep_frames_menus():
     option_menu = create_option_menu(select_save_frame_from_menu, keep_frames_list, default_keep_frames, width = little_menu_width)
     info_button.place(relx = column_info2,      rely = widget_row, anchor = "center")
     option_menu.place(relx = column_2_9, rely = widget_row, anchor = "center")
+
+    # Frame format
+    info_button = create_info_button(open_info_frame_extension, "Frame format")
+    option_menu = create_option_menu(select_frame_extension_from_menu, frame_extension_list, default_frame_extension, width = little_menu_width)
+    info_button.place(relx = column_3,   rely = widget_row, anchor = "center")
+    option_menu.place(relx = column_3_5, rely = widget_row, anchor = "center")
 
 def place_advanced_video_options():
 
@@ -3053,6 +3106,7 @@ def on_app_close() -> None:
     global selected_gpu
     global selected_blending_factor
     global selected_image_extension
+    global selected_frame_extension
     global selected_video_extension
     global selected_video_codec
     global selected_pix_fmt
@@ -3063,6 +3117,7 @@ def on_app_close() -> None:
     AI_model_to_save        = f"{selected_AI_model}"
     gpu_to_save             = selected_gpu
     image_extension_to_save = selected_image_extension
+    frame_extension_to_save = selected_frame_extension
     video_extension_to_save = selected_video_extension
     video_codec_to_save     = selected_video_codec
     pix_fmt_to_save         = selected_pix_fmt
@@ -3085,6 +3140,7 @@ def on_app_close() -> None:
         "default_gpu":                  gpu_to_save,
         "default_keep_frames":          keep_frames_to_save,
         "default_image_extension":      image_extension_to_save,
+        "default_frame_extension":      frame_extension_to_save,
         "default_video_extension":      video_extension_to_save,
         "default_video_codec":          video_codec_to_save,
         "default_pix_fmt":              pix_fmt_to_save,
@@ -3150,6 +3206,7 @@ if __name__ == "__main__":
             default_gpu                  = json_data.get("default_gpu",                  gpus_list[0])
             default_keep_frames          = json_data.get("default_keep_frames",          keep_frames_list[1])
             default_image_extension      = json_data.get("default_image_extension",      image_extension_list[0])
+            default_frame_extension      = json_data.get("default_frame_extension",      frame_extension_list[0])
             default_video_extension      = json_data.get("default_video_extension",      video_extension_list[0])
             default_video_codec          = json_data.get(
                 "default_video_codec",
@@ -3172,6 +3229,7 @@ if __name__ == "__main__":
         default_gpu                  = gpus_list[0]
         default_keep_frames          = keep_frames_list[1]
         default_image_extension      = image_extension_list[0]
+        default_frame_extension      = frame_extension_list[0]
         default_video_extension      = video_extension_list[0]
         default_video_codec          = "hevc_amf" if amd_gpu_hint and "hevc_amf" in video_codec_list else video_codec_list[0]
         default_pix_fmt              = "yuv420p10le" if amd_gpu_hint else pix_fmt_list[0]
@@ -3204,6 +3262,7 @@ if __name__ == "__main__":
     global selected_gpu
     global selected_keep_frames
     global selected_image_extension
+    global selected_frame_extension
     global selected_video_extension
     global selected_video_codec
     global selected_pix_fmt
@@ -3226,6 +3285,7 @@ if __name__ == "__main__":
     selected_AI_model        = default_AI_model
     selected_gpu             = default_gpu
     selected_image_extension = default_image_extension
+    selected_frame_extension = default_frame_extension
     selected_video_extension = default_video_extension
     selected_video_codec     = default_video_codec
     selected_pix_fmt         = default_pix_fmt
