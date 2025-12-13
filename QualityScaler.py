@@ -175,7 +175,7 @@ blending_list          = [ "OFF", "Low", "Medium", "High" ]
 gpus_list              = [ "Auto", "GPU 1", "GPU 2", "GPU 3", "GPU 4" ]
 keep_frames_list       = [ "OFF", "ON" ]
 image_extension_list   = [ ".png", ".jpg", ".bmp", ".tiff" ]
-frame_extension_list   = [ ".png", ".jpg" ]
+frame_extension_list   = image_extension_list
 video_extension_list   = [ ".mp4", ".mkv", ".avi", ".mov" ]
 video_codec_list = [
     "x264",        "x265",        MENU_LIST_SEPARATOR[0],
@@ -2419,11 +2419,17 @@ def select_save_frame_from_menu(selected_option: str):
 
 def select_image_extension_from_menu(selected_option: str) -> None:
     global selected_image_extension
+    global selected_frame_extension
+
     selected_image_extension = selected_option
+    selected_frame_extension = selected_option
 
 def select_frame_extension_from_menu(selected_option: str) -> None:
     global selected_frame_extension
+    global selected_image_extension
+
     selected_frame_extension = selected_option
+    selected_image_extension = selected_option
 
 def select_video_extension_from_menu(selected_option: str) -> None:
     global selected_video_extension
@@ -2783,6 +2789,8 @@ def place_image_video_output_menus():
 
     def open_info_image_output():
         option_list = [
+            "Esta extensión se usa para las imágenes reescaladas y los fotogramas guardados al procesar vídeo.\n",
+
             " \n PNG\n"
             " • Muy buena calidad\n"
             " • Archivo pesado y más lento\n"
@@ -2816,7 +2824,7 @@ def place_image_video_output_menus():
         MessageBox(
             messageType   = "info",
             title         = "Salida de imagen",
-            subtitle      = "Elige la extensión para las imágenes reescaladas",
+            subtitle      = "Elige la extensión para las imágenes reescaladas y los fotogramas extraídos",
             default_value = None,
             option_list   = option_list
         )
@@ -2909,7 +2917,8 @@ def place_video_codec_keep_frames_menus():
     def open_info_keep_frames():
         option_list = [
             "\n ON \n" +
-            " La app NO borra los fotogramas extraídos tras crear el vídeo reescalado \n",
+            " La app NO borra los fotogramas extraídos tras crear el vídeo reescalado \n"
+            " Se guardan con el formato elegido en 'Salida de imagen' \n",
 
             "\n OFF \n" +
             " La app borra los fotogramas extraídos tras crear el vídeo reescalado \n"
@@ -2919,21 +2928,6 @@ def place_video_codec_keep_frames_menus():
             messageType   = "info",
             title         = "Conservar fotogramas",
             subtitle      = "Elige si quieres mantener los fotogramas extraídos",
-            default_value = None,
-            option_list   = option_list
-        )
-
-    def open_info_frame_extension():
-        option_list = [
-            "\n FORMATO DE FOTOGRAMA \n",
-            " • .png | Extracción sin pérdida (mayor tamaño, máxima calidad)\n",
-            " • .jpg | JPEG de alta calidad con compresión mínima\n",
-        ]
-
-        MessageBox(
-            messageType   = "info",
-            title         = "Formato de fotograma",
-            subtitle      = "Elige cómo se guardan los fotogramas extraídos",
             default_value = None,
             option_list   = option_list
         )
@@ -2961,12 +2955,6 @@ def place_video_codec_keep_frames_menus():
     option_menu = create_option_menu(select_save_frame_from_menu, keep_frames_list, default_keep_frames, width = little_menu_width)
     info_button.place(relx = column_info2,      rely = widget_row, anchor = "center")
     option_menu.place(relx = column_2_9, rely = widget_row, anchor = "center")
-
-    # Frame format
-    info_button = create_info_button(open_info_frame_extension, "Formato de frame")
-    option_menu = create_option_menu(select_frame_extension_from_menu, frame_extension_list, default_frame_extension, width = little_menu_width)
-    info_button.place(relx = column_3,   rely = widget_row, anchor = "center")
-    option_menu.place(relx = column_3_5, rely = widget_row, anchor = "center")
 
 def place_advanced_video_options():
 
@@ -3117,7 +3105,7 @@ def on_app_close() -> None:
     AI_model_to_save        = f"{selected_AI_model}"
     gpu_to_save             = selected_gpu
     image_extension_to_save = selected_image_extension
-    frame_extension_to_save = selected_frame_extension
+    frame_extension_to_save = selected_image_extension
     video_extension_to_save = selected_video_extension
     video_codec_to_save     = selected_video_codec
     pix_fmt_to_save         = selected_pix_fmt
@@ -3206,7 +3194,7 @@ if __name__ == "__main__":
             default_gpu                  = json_data.get("default_gpu",                  gpus_list[0])
             default_keep_frames          = json_data.get("default_keep_frames",          keep_frames_list[1])
             default_image_extension      = json_data.get("default_image_extension",      image_extension_list[0])
-            default_frame_extension      = json_data.get("default_frame_extension",      frame_extension_list[0])
+            default_frame_extension      = json_data.get("default_frame_extension",      default_image_extension)
             default_video_extension      = json_data.get("default_video_extension",      video_extension_list[0])
             default_video_codec          = json_data.get(
                 "default_video_codec",
@@ -3229,7 +3217,7 @@ if __name__ == "__main__":
         default_gpu                  = gpus_list[0]
         default_keep_frames          = keep_frames_list[1]
         default_image_extension      = image_extension_list[0]
-        default_frame_extension      = frame_extension_list[0]
+        default_frame_extension      = default_image_extension
         default_video_extension      = video_extension_list[0]
         default_video_codec          = "hevc_amf" if amd_gpu_hint and "hevc_amf" in video_codec_list else video_codec_list[0]
         default_pix_fmt              = "yuv420p10le" if amd_gpu_hint else pix_fmt_list[0]
@@ -3285,7 +3273,7 @@ if __name__ == "__main__":
     selected_AI_model        = default_AI_model
     selected_gpu             = default_gpu
     selected_image_extension = default_image_extension
-    selected_frame_extension = default_frame_extension
+    selected_frame_extension = default_image_extension
     selected_video_extension = default_video_extension
     selected_video_codec     = default_video_codec
     selected_pix_fmt         = default_pix_fmt
